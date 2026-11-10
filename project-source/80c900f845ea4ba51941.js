@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/ingestion_admin/tasks/__init__.py", "lines": ["\"\"\"Long-running entrypoints of the ingestion admin package.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "d608f3ed3339ac1f1d5d7f3d379c21ed75e7d050b6a7d47e93ee510eb5da6afc", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "test/unit/microservices/ai_model_tagging/services/__init__.py", "lines": [], "blocks": [], "lineCount": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "endsWithNewline": false});

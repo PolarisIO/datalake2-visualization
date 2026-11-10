@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/observability/__init__.py", "lines": ["\"\"\"Package initializer for cross-service observability primitives in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "dee06e4d24f9905944dfa0a2dab7ff80584065d1990bcc6ae72ecb95a6ae282b", "endsWithNewline": true});

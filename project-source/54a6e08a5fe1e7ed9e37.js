@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/ai_model_tagging/__init__.py", "lines": ["\"\"\"Package initializer for the AI model tagging microservice in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "48745c376efaa225b8573e407fb1c147b005af399610faffbebc475b4ec701f6", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/feeds/logging/__init__.py", "lines": ["from .logger import logger as logger"], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "08ad610851d0d27a3c6d07ee372c4f2b106adb3dffb74e3c334db711102c9132", "endsWithNewline": true});

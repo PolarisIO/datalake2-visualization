@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/utils/__init__.py", "lines": ["\"\"\"Package initializer for utility functions in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "3322a7cbbfc7472cafa6c06701c6d2961978530828360d624769d753a4a71c7d", "endsWithNewline": true});

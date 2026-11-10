@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_synthesis/tasks/__init__.py", "lines": ["\"\"\"Package initializer for event_synthesis.tasks.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "e64abfe1cc0205f025291cbec77fafb3ad8ca709f404421833510508820cee65", "endsWithNewline": true});

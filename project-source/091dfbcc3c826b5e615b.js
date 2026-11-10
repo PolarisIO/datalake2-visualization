@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "tools/__init__.py", "lines": ["\"\"\"Repository tooling packages.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "5266f4151c10719554cf5a62ac53ea687991ec7ddda6f654c35cc5994ad980ca", "endsWithNewline": true});

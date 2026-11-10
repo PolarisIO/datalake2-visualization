@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/script_runner/app/__init__.py", "lines": ["\"\"\"Script Runner application package.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "73b1cd468a1c5d656b85fe589ffe3bac98c6a64eae629b092df06aae401d61f9", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/web_extraction/__init__.py", "lines": ["\"\"\"Package initializer for the web_extraction microservice.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "f3d0905c251d68d568b36edef6039f9c9c3bf6fa9514586e789ff271597a29b0", "endsWithNewline": true});

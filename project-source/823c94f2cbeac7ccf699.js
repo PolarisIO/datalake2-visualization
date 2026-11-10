@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/registries/__init__.py", "lines": ["\"\"\"Package initializer for shared DB-backed registries in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "753406170b8b98b0db363d34bfcffba3a695b109ca74246ebc30956ce2d92c84", "endsWithNewline": true});

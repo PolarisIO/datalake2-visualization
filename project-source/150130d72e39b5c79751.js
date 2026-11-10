@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_extraction/cli/__init__.py", "lines": ["\"\"\"Event extraction CLI (fixture orchestration).\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "50d38d7d0e7b115ba1e8ee69a0d97ff26495560029a4ff77afa75312ffcd2555", "endsWithNewline": true});

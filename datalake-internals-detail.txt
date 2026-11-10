@@ -1,0 +1,253 @@
+DataLake2 internals: storage, lifecycle and recovery
+Source-only investigation, 2026-11-09
+Repository: PolarisIO/DataLake2
+Revision: a5ef1eca3c1072dc895ce5058dbfdd180ca6d6d1
+Companion: queue-delivery-detail.txt in this same private folder.
+
+Scope
+This explains the current document/article and event paths at code level. It is not an exhaustive ingestion-spine audit. No tests, database queries, service launches, queue operations, code edits or cloud operations were performed. Every ID below is invented. All relative path:line references are relative to the repository above; an additional Accelerate model reference is explicitly absolute.
+
+1. IDs are different kinds of evidence
+
+article_id: stable content identity (web_extraction.articles), reused across retries and intended article replay.
+activity_id: one stage's run; belongs to that stage's layer_one/layer_two/layer_three_activities table.
+source_activity_id: upstream stage run, not necessarily a same-schema FK. AIQ L1 uses source_microservice to identify the owner because its upstream can be web_extraction or article_translation.
+msg_tracking_id: application delivery identity, persisted before send. The shared SQS worker substitutes the payload's non-null msg_tracking_id for native SQS MessageId before registering an activity.
+native_sqs_message_id: broker response receipt recorded after a send; useful audit evidence but not the receiver's stable business identity.
+manual_upload_account_id: the account/document-specific upload association, required to disambiguate duplicate/manual paths.
+doc_id: Accelerate-facing document identity, not interchangeable with article_id.
+raw_event_id: extracted event identity and ESS's durable ledger/recovery key.
+Sources: src/common/aws/sqs/worker.py:224; src/microservices/ai_questionnaire/models/layer_one_activities.py:38; src/microservices/web_extraction/models/manual_upload_accounts.py:20; src/common/models/contracts/sent_sqs_messages.py:19.
+
+A log line containing only article_id can mix multiple runs. To trace one attempt, retain the activity trail and msg_tracking_id too. process_and_handle_msg binds the stage's activity ID, incoming activity trail, article type and document/upload context before work.
+Source: src/microservices/ai_questionnaire/tasks/message_processing/process_and_handle.py:92.
+
+2. The storage joins that matter
+
+web_extraction.responses: WebExtractionResponse, one layer-specific response per extraction activity; unique layer_one_activity_id and layer_two_activity_id. It stores response status/body inherited from ResponseBase.
+Source: src/microservices/web_extraction/models/responses.py:25; src/common/models/contracts/activity.py:35.
+
+web_extraction.zyte_articles: ZyteArticle, unique response_id, FK to Article. upsert_zyte_article first recovers an existing article through response_id; otherwise it creates Article and writes ZyteArticle/chunks in one transaction. A retry can avoid creating another canonical article.
+Sources: src/microservices/web_extraction/models/zyte_articles.py:20; src/microservices/web_extraction/services/helpers/layer_two.py:820.
+
+web_extraction.activity_article_statuses: ActivityArticleStatus, outcome link for L2/L3. Unique layer_two_activity_id and layer_three_activity_id; requires article_id or duplicated_article_id. Notice the real table name is plural statuses; some prose docs shorten it.
+Source: src/microservices/web_extraction/models/activity_article_statuses.py:25.
+
+web_extraction.manual_upload_accounts: ManualUploadAccount links manual_upload_id, account_id, doc_id and layer_three_activity_id. Unique key is (manual_upload_id, account_id), NOT layer_three_activity_id alone. The recovery lookup deliberately uses (activity_id, account_id, doc_id).
+Sources: src/microservices/web_extraction/models/manual_upload_accounts.py:24; src/microservices/web_extraction/services/helpers/manual_upload.py:129.
+
+ai_questionnaire.entity_responses: EntityResponse, unique (layer_one_activity_id, entity_type); three types PEOPLE/ORGANIZATIONS/LOCATIONS are the current entity-response path. These are not the same as category response rows.
+Source: src/microservices/ai_questionnaire/models/entity_responses.py:24 and :79.
+
+ai_questionnaire.model_category_responses: ModelCategoryResponse, unique (layer_one_activity_id, category_id).
+ai_questionnaire.filter_model_responses: FilterModelResponse, unique (layer_two_activity_id, category_id).
+Sources: src/microservices/ai_questionnaire/models/model_category_responses.py:71; src/microservices/ai_questionnaire/models/filter_model_responses.py:74.
+
+entity_classification.doc_article_map: DocArticleMap, unique (article_id, doc_id, layer_one_activity_id). Retains per-run lineage; manual_upload_account_id distinguishes manual from crawled mappings.
+Source: src/microservices/entity_classification/models/doc_article_map.py:53.
+
+ai_model_tagging.category_prompt_version_runs: CategoryPromptVersionRun, unique (layer_one_activity_id, category_id), points to the document/article mapping.
+ai_model_tagging.data_model_responses: DataModelResponse, unique (category_prompt_version_run_id, data_model_version_id).
+Sources: src/microservices/ai_model_tagging/models/category_prompt_version_runs.py:50; src/microservices/ai_model_tagging/models/data_model_responses.py:48.
+
+These keys explain why retry and replay differ: the same run conflicts/upserts or skips; a genuinely new run can preserve new history. They do not give a universal exactly-once transaction across services or databases.
+
+3. Activity creation and the state machine are application rules
+
+ActivityBase supplies run_state, request_type_id, queued_at, process_started_at, completion_at and failed_at. RunState defines INITIALIZED, QUEUED, PROCESSING, COMPLETED, FAILED, DUPLICATE and SKIPPED.
+Sources: src/common/models/contracts/activity.py:15; src/common/models/enums/run_state.py:6.
+
+create_activity_row:
+- chooses service-specific required inputs, e.g. feed_id for WebEx L1, doc_id for L3, source/activity/type discriminator for AIQ L1;
+- creates QUEUED, stamps queued_at, flushes and commits even when passed a caller's session;
+- wraps any PostgreSQL 23505 unique violation as DuplicateActivityException.
+Source: src/common/helpers/activity.py:56, :112, :177, :193.
+
+The last detail matters: it does not inspect which unique constraint failed before labeling the error a duplicate. AIQ L1 and EC L1 have unique source_activity_id as well as msg_tracking_id. Simply issuing a new tracking UUID against the same upstream source is not a general replay mechanism.
+Sources: src/microservices/ai_questionnaire/models/layer_one_activities.py:69; src/microservices/entity_classification/models/layer_one_activities.py:57.
+
+activity_run_state_update loads the row, sets run_state and the timestamp mapped to the NEW state, then commits. It does not enforce a transition graph or clear old timestamp columns.
+- PROCESSING -> process_started_at
+- COMPLETED, DUPLICATE, SKIPPED -> completion_at
+- FAILED -> failed_at
+Source: src/common/helpers/activity.py:45 and :248.
+
+Thus failed_at can remain from an earlier failed attempt after eventual completion; read run_state and completion_at together. A contradictory row with completion_at populated will be excluded from retry claiming even if its run_state says FAILED. That is predicate behavior, not evidence such a row exists.
+
+4. Duplicate resolution and retry claim
+
+register_activity performs the initial duplicate read and activity create in one session. On a uniqueness race it attempts to delete that received message and returns no work. On an existing row it closes the lookup session before resolve_duplicate.
+Source: src/common/utils/activity_registration.py:68.
+
+resolve_duplicate decisions:
+- COMPLETED/DUPLICATE/SKIPPED: delete the received message; a deletion failure is logged and the message may reappear.
+- FAILED: attempt reclaim.
+- QUEUED: reclaim only if queued_at exists and is older than the supplied threshold.
+- PROCESSING: always consult the atomic claim; the SQL predicate decides whether it is stale.
+- Other/fresh/unclaimed: leave on queue for visibility timeout/redelivery.
+Source: src/common/utils/duplicate_message.py:145.
+
+try_claim_activity_retry performs one conditional UPDATE and checks rowcount == 1. Its predicate requires completion_at IS NULL, then either QUEUED/FAILED, or PROCESSING with a missing/old process_started_at. It writes PROCESSING and a fresh process_started_at and commits.
+Source: src/common/helpers/activity.py:567 and :602.
+
+This is not a heartbeat/liveness probe: another process can still be running after the configured stale age. A successful claim is evidence that the SQL condition won, not proof that external side effects never occurred in the earlier attempt. Idempotent downstream writes still matter.
+
+5. Timeouts, cancellation, queue visibility and reaping are separate mechanisms
+
+AIQ task handler first commits PROCESSING, calls the pipeline, catches CancelledError separately, records activity failure best effort and re-raises cancellation. Ordinary exceptions use handle_error_state_update, then attempt guarded manual-document failure propagation.
+Source: src/microservices/ai_questionnaire/tasks/message_processing/layer_one_messages.py:55.
+
+handle_cancellation_state_update and handle_timeout_state_update open fresh sessions and use compare-and-swap PROCESSING -> FAILED. A completed activity is not clobbered by those two helpers. They do not update Accelerate's document status.
+Source: src/common/helpers/activity.py:356 and :417.
+
+handle_error_state_update differs: it uses the unconditional state updater. It skips missing activities and a SQLAlchemy pool timeout found within five __cause__ links, avoiding another blocked connection attempt. Cleanup is best effort.
+Source: src/common/helpers/activity.py:490 and :547.
+
+InflightTaskManager wraps the coroutine in asyncio.timeout, emits one canonical timeout error, calls the registered timeout cleanup callback and releases its slot. Shutdown can drain, then cancels remaining tasks and gathers them. An asynchronous task completion log is not equivalent to all downstream stages completing.
+Source: src/common/utils/inflight_tasks.py:142 and :266.
+
+The shared worker validates/registers BEFORE awaiting a free task slot. Queue visibility began at receive, not at task start; slot pressure and registration latency consume the budget. Keep receive_count, task/queue timeout configuration and stale-handle errors when diagnosing a slow message.
+Source: src/common/aws/sqs/worker.py:275-324.
+
+AIQ successful processing is followed by delete_message. An exception adjusts visibility rather than deleting the message. Only explicitly retryable errors receive jittered exponential delay; false or unclassified errors get visibility zero, accelerating normal queue redrive. Cancellation re-raises and leaves the message.
+Sources: src/microservices/ai_questionnaire/tasks/message_processing/process_and_handle.py:160; src/common/utils/backoff.py:28.
+
+Code defaults (not observed effective runtime): AIQ visibility 450s; task timeout derives as visibility minus 30s when unset; common stale-processing threshold 500s, stale-reaper threshold 900s, reaper interval 300s. Configuration can override them; verify effective values before interpreting age.
+Sources: src/microservices/ai_questionnaire/config/config.py:81; src/common/config/config_base.py:46 and :282.
+
+reap_stale_activities sets stale PROCESSING/QUEUED rows to FAILED when completion_at is NULL. It does not resend anything, move a DLQ message back or complete the document. Its SQL compares timestamps with '< cutoff'; NULL timestamps do not satisfy that expression. Retry claiming handles a missing PROCESSING timestamp, but this reaper does not.
+Source: src/common/helpers/stale_activity_reaper.py:43 and :66.
+
+If a message is already in a DLQ, marking its activity FAILED does not itself make it runnable. A separate authorized replay/redrive and correct lineage are required.
+
+6. Commit-before-send: precise guarantee and current caller gaps
+
+The sender writes application identity and payload into sent_sqs_messages and commits BEFORE queue I/O. This allows the next service's activity FK to resolve. The broker receipt is written afterwards in a separate best-effort transaction.
+Sources: src/common/helpers/sqs_msg_delivery.py:327, :377, :397.
+
+The single-send helper skips only when native_sqs_message_id is non-null AND send_failed_at is null. UNKNOWN (both null) and failed rows are candidates to resend, reusing the existing application ID after a matching uniqueness conflict. A lost broker response can still cause duplicate delivery; the database and SQS are not one transaction.
+Source: src/common/helpers/sqs_msg_delivery.py:191-236.
+
+Not every producer has a unique activity key: WebEx L1 fans out and feeds have no equivalent single-activity uniqueness. Batch sending commits all tracking rows, then sends individually. See queue-delivery-detail.txt for exact producer keys, failure windows and tests.
+
+Two independently source-checked caller gaps:
+- AIQ entities: after all three entity rows exist, check_for_sqs_message_sent returns true for ANY tracking row for that L1 activity, without checking receipt/failure. run_entities_layer_one can return before the improved send helper is reached.
+  Sources: src/microservices/ai_questionnaire/services/helpers/layer_one.py:16; src/microservices/ai_questionnaire/services/entities/service.py:416.
+- WebEx L1: get_already_sent_article_urls filters only send_failed_at IS NULL, not native receipt. A crash after batch tracking commit but before all sends can leave unsent URLs classified as sent on same-activity retry.
+  Sources: src/microservices/web_extraction/services/helpers/common.py:95; src/common/helpers/sqs_msg_delivery.py:487.
+
+These are code-level failure windows, not reproduced incidents, and not new approved ticket scope. They qualify any broad claim that tracking existence proves successful dispatch.
+
+7. Retry versus replay — and misleading documentation
+
+Retry uses the same application delivery and activity identity; completed response rows are reused and downstream deliveries may be retried. AIQ category skip checks filter by activity_id; current entities are a dedicated three-row response set.
+Sources: src/microservices/ai_questionnaire/services/helpers/layer_one.py:32 and :53.
+
+The idempotency document describes article replay from AIQ L1 with new activity history and reused article/document content. It contains an older sentence suggesting reuse when prompt versions are unchanged, then later explicitly says skip checks are by activity_id and new activities rerun inference. Current row checks support the latter.
+Source: .docs/codebase/IDEMPOTENCY.md (Replay Entry Point and AI Questionnaire sections).
+
+Do not turn that prose into an invented replay command. This review did not establish a general article replay CLI or a safe new-source identity policy. Unique source_activity_id must be respected. Event Synthesis has a separate, explicit replay mechanism below.
+
+Manual retry recovery has two anchors:
+- ActivityArticleStatus records a finished L3 outcome. DUPLICATE short-circuits; canonical article_id excludes its own old chunks from duplicate detection.
+- ManualUploadAccount also recovers the article after the content commit but before status write, using the full activity/account/document key. This closes the earlier failure window.
+Sources: src/microservices/web_extraction/services/helpers/manual_upload.py:91 and :129; src/microservices/web_extraction/services/web_extraction.py:1280.
+
+upsert_zyte_article preserves one response-to-article link. Under a concurrent race both workers may initially create Article; the losing upsert adopts the winner's article_id and retargets chunks. The code comments acknowledge a leftover orphan Article: this is not proof of perfect global duplicate elimination.
+Source: src/microservices/web_extraction/services/helpers/layer_two.py:857 and :933.
+
+8. Cross-database document projection is recoverable, not atomic
+
+lookup_existing_doc_id reads the latest doc_article_map for article plus manual/crawled discriminator. On the crawled path, lookup_orphaned_document can recover an Accelerate document whose creation committed before the DataLake mapping did. Its guard query errors propagate; failure must not be treated as "not found" and create another document.
+Source: src/microservices/entity_classification/services/helpers/external/accelerate_table_writes.py:79 and :113.
+
+The existing/orphaned paths still rewrite current chunks/entity data and projections. No distributed transaction spans DataLake and Accelerate.
+Source: src/microservices/entity_classification/services/helpers/external/sync.py:652.
+
+Document status is another state machine. mark_manual_upload_failed changes only PROCESSING or QUESTIONING documents, ignores crawled input/missing document IDs, owns its write scope and logs failures without replacing the original error. READY/DUPLICATE documents remain protected.
+Source: src/common/helpers/accelerate_document.py:17, :158, :174.
+
+Do not equate an activity becoming FAILED with a document becoming FAILED. Cancellation/timeout helpers and stale reaper affect the activity only; ordinary AIQ L1 exception handling separately calls the document helper. This is the source basis for the earlier narrow status follow-up, not a production reproduction.
+
+9. Event Synthesis has a different durable ledger
+
+EssProcessingLedger is keyed by raw_event_id, with states claimed/completed/failed, claimed_at, completed_at, resulting_event_id and short error. It deliberately has no FK to raw_events or the cross-database source event, so it can outlive the raw record.
+Source: src/microservices/event_synthesis/models/ledger.py:16.
+
+LedgerRepository writes do not commit themselves. claim_or_reclaim upserts claimed and resets completion/result/error; complete/fail require the row to exist. The worker supplies short transaction scopes.
+Source: src/microservices/event_synthesis/services/ledger_repo.py:18.
+
+Worker decision:
+- completed -> ACK without synthesizing;
+- failed without replay_reason -> ACK without retry;
+- failed with replay_reason -> fresh attempt;
+- claimed -> check committed Accelerate evidence first; if found, complete ledger then ACK;
+- claimed without evidence at max attempts -> failed ledger, a grace visibility interval, return terminal_failure;
+- otherwise claim, read raw event, synthesize outside the DataLake transaction, complete ledger, ACK.
+Source: src/microservices/event_synthesis/tasks/message_processing/process_message.py:99-220.
+
+RecoveryService searches source_event_documents first, then source_event_changes by triggering_raw_event_id. This repairs the Accelerate-commit/DataLake-ledger-completion gap.
+Source: src/microservices/event_synthesis/services/recovery.py:30.
+
+Create flow inserts a SourceEventDocument receipt with ON CONFLICT DO NOTHING on raw_event_id. Empty RETURNING triggers a sentinel that rolls back the create transaction, then looks up the existing event. If the receipt disappeared in between, it raises a typed data error rather than pretending success.
+Source: src/microservices/event_synthesis/services/synthesis_service.py:349-428.
+Actual model uniqueness: PolarisIO/accelerate/event_synthesis/app/models/source_event_documents.py:30 (Accelerate revision 8c494806c).
+
+Do not apply the common activity's "FAILED is immediately retryable" rule to this ledger. A failed ESS ledger needs replay_reason; a completed ledger still short-circuits even when that field is present. The truthy payload field selects code behavior; it does not itself establish operator authorization. Do not label ordinary redelivery, an operator ESS replay and a new AIQ historical run as the same operation.
+
+10. Transaction tools: their names do not enforce read-only behavior
+
+AsyncDatabaseSessionManager.session yields a session, rolls back ordinary exceptions and always closes. It does NOT commit a successful block.
+read_session/write_session both use _commit_scope: commit on normal exit, ordinary error propagates through rollback/close. read_session is an intent label, not a database read-only restriction.
+Source: src/db/session_manager_async.py:190, :219, :234, :249.
+
+expire_on_commit=False allows loaded scalar attributes after commit. It does not make unloaded lazy relationships safe outside the scope. Pinned sessions keep one physical connection for session-level advisory locks, but the caller must still commit normal read transactions before external I/O.
+Source: src/db/session_manager_async.py:150, :262; .docs/codebase/TRANSACTION_SCOPING.md.
+
+read_replica_session routes to configured replica only for allowed stale-tolerant reads, with force_writer for read-after-write. Dedup/recovery reads are explicitly writer-bound. A healthy replica can still lag a just-committed row; do not turn "missing on replica" into proof no activity or document exists.
+Source: src/db/session_manager_async.py:550.
+
+Never hold a DB transaction across model calls, queue sends, S3, cross-DB calls or sleeps. The application lock backstop does not replace short transactions. A pinned advisory lock and a PostgreSQL relation/transaction lock have different lifetimes.
+Source: .docs/codebase/TRANSACTION_SCOPING.md; test/integration/db/test_idle_in_transaction_probe.py:66.
+
+11. Lead's diagnostic walkthrough without opening customer content
+
+Invented labels only:
+article A-DEMO, AIQ run Q-DEMO, outbound tracking M-DEMO, EC run E-DEMO, document D-DEMO.
+
+Ask for metadata/projections, not article text or message payloads:
+1) Identify the entry path and expected terminal result. Manual duplicate, no-entity crawled article and normal document are not the same success contract.
+2) Resolve inbound application tracking ID and activity trail. If no activity exists, inspect validation/registration error class, request type and layer before blaming the pipeline stage.
+3) For Q-DEMO inspect run_state plus all timestamps, not state alone. Check current effective timeout/stale values and whether a message remains receivable, became invisible or reached DLQ.
+4) Count entity response types/category rows for Q-DEMO. Do not mix rows for A-DEMO from different activities.
+5) For the Q-DEMO -> E-DEMO handoff inspect tracking ID, source activity/layer, native receipt presence and failure timestamp. Tracking existence alone is inconclusive.
+6) If receipt exists but E-DEMO does not, inspect receiver validation/unique/FK errors and app/native identity mapping. If no receipt, distinguish known send failure from UNKNOWN after a crash.
+7) If E-DEMO exists and is completed, inspect its has_entity_matches, doc_article_map discriminator and expected downstream policy. A deliberate no-match completion is not automatically a stalled document.
+8) If DataLake projection exists but D-DEMO is unresolved, check the cross-DB recovery guard outcome and document-status transition separately.
+9) For raw event R-DEMO, use ESS ledger and committed evidence receipt, not the AIQ activity retry decision tree.
+10) Record the last proven boundary, next expected receipt and narrow uncertainty. Do not "fix" by deleting state, clearing sent markers, marking completion or replaying with fabricated IDs.
+
+Possible metadata conclusion:
+"Q-DEMO has three entity responses, a tracking row with NULL native receipt and NULL failure timestamp, and no observed EC activity. That proves the response commit and tracking commit, not the send. The caller's existence-only guard is a source-supported explanation to investigate."
+This is an invented example, not a finding about any real item.
+
+12. Existing checks inspected, not run
+
+- test/unit/common/helpers/test_activity.py:28 state/timestamp update; :88 conditional rowcount; :153 cancellation; :176 timeout logging; :246 wrapped pool timeout; :325 retry claim rowcount/commit errors. The retry test uses mocks; it is not proof of concurrent SQL behavior.
+- test/unit/db/test_session_manager_async.py:85 commit-on-success; :102 rollback/reraise; :165 pinned connection; :641 writer fallback; :669 must-see-own-writes stays on writer.
+- test/unit/microservices/web_extraction/services/test_layer_two_lock_scope.py:281 verifies external-I/O ordering; :346 advisory-lock acquisition.
+- test/unit/microservices/entity_classification/test_layer_one_lock_scope.py:288 queue send outside DataLake transaction; :399 master release on reuse path.
+- test/unit/microservices/ai_model_tagging/services/test_layer_one_lock_scope.py:95 DataLake release before Accelerate writes.
+- test/integration/db/test_idle_in_transaction_probe.py:66 separate-connection catalog/lock observation across a simulated I/O pause, local integration/slow test.
+- test/integration/web_extraction/test_l3_retry_idempotency.py:276 full-key multiple-anchor recovery; :390 retry after intermediate metadata failure; :595 L3 outcome upsert.
+- test/unit/microservices/test_import_boundaries.py:168 prevents new cross-service imports; :178 requires old-violation baseline to shrink.
+- test/unit/microservices/test_release_env_boot.py:149 imports releases independently with only their own rendered settings; this is import isolation, not a running pipeline proof.
+- Queue-specific unit and DB tests are listed in queue-delivery-detail.txt.
+
+13. Boundaries and unknowns
+
+The new ingest_control and ingest_ledger stores are distinct model/migration/session domains. Their ledger/outbox design is not the article sent_sqs_messages mechanism described here, nor the ESS ledger. This report does not certify that broader ingestion spine.
+
+No effective production settings, queue state, DLQ state, migrations, real document state or current concurrency were inspected. No bug was reproduced. Existing docs contain stale descriptions; source and tests were used to qualify them. A deployment may run a different revision from this local checkout. No claim here establishes cloud health, current customer impact, or successful replay.
+
+The correct reliability summary is bounded evidence plus idempotent recovery at specific keys, not global exactly-once processing.

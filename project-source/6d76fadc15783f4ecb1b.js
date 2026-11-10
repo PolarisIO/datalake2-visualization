@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/api/__init__.py", "lines": ["\"\"\"Package initializer for the API submodule in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "c7ac842009236f2afb12e08829d2db58d33340f5e0467e9a63ca23bac6fde137", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/feeds/services/__init__.py", "lines": ["from .feeds import FeedService as FeedService"], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "7a3f4af2e7c7d1cd521cb02ef446abcffa142b72ce5f6ea66a05dd330ea9b7ea", "endsWithNewline": true});

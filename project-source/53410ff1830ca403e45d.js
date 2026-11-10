@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/alembic/README", "lines": ["Generic single-database configuration."], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "85e33379b63094686713cff80962782d2ef85a81198c1cbe4be988251c4010a2", "endsWithNewline": true});

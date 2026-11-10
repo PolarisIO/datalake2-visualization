@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_synthesis/aws/sqs/__init__.py", "lines": ["\"\"\"SQS integration package for the Event Synthesis Service.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "6045c3fd2d6b0d75a7bdf1378005a69a4a122dcfde7ecd53e07c1dc2f434d7a3", "endsWithNewline": true});

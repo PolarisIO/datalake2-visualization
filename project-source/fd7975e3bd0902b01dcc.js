@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/schemas/__init__.py", "lines": ["\"\"\"Package initializer for schemas in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "290257a962e898502775d1a255f8f4fc9f75f58cae15fbd6e2842ad558ec9bf1", "endsWithNewline": true});

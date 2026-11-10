@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_extraction/__init__.py", "lines": ["\"\"\"Package initializer for the event extraction microservice in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "fb0b52f4f26ba20e1b04fa242a2c5364db2613c65fc6301cda643bd3e660abb1", "endsWithNewline": true});

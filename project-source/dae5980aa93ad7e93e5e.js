@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/__init__.py", "lines": ["\"\"\"Package initializer for common utilities and shared code in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "0cbc7de0fdcd7848fbf788a5c81fb0f70921196111d9e80fcf19ae0fe7c34880", "endsWithNewline": true});

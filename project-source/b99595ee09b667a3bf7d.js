@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_synthesis/services/helpers/__init__.py", "lines": ["\"\"\"Helpers for ESS service-layer operations.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "f45d56d51e6c938114db4a6ed7cdd91e5881545eda2ca1e2fee8e2639cdc23f4", "endsWithNewline": true});

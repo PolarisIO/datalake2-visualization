@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/ai_questionnaire/__init__.py", "lines": ["\"\"\"Package initializer for the AI questionnaire microservice in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "69f2eb53cb8541fc05a6a2e7bf0663dd0e2d49db39da9ac771e8261d3059ea2b", "endsWithNewline": true});

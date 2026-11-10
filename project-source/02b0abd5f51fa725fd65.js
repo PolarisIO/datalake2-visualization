@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/entity_classification/api/__init__.py", "lines": ["from .api import api_router as api_router"], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "5cceb9f01692aef4a28399887a338d59a49cae6c2be84c154385af0af1f46773", "endsWithNewline": true});

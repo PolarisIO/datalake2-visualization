@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/feeds/cli/fixtures/data/feed_markets.json", "lines": ["[]"], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570", "endsWithNewline": true});

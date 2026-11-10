@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "CLAUDE.md", "lines": ["@AGENTS.md"], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49", "endsWithNewline": true});

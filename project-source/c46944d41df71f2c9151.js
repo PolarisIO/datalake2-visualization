@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/helpers/__init__.py", "lines": ["\"\"\"Package initializer for the helpers submodule in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "662c632f41a724fe150ea5019d43a435604a01ffef2c482b6861f6df1eb312c8", "endsWithNewline": true});

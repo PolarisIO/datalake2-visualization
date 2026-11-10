@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "test/unit/microservices/event_synthesis/repositories/__init__.py", "lines": ["\"\"\"Unit tests for event_synthesis repositories.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "03c1819d1753ca661efeca56258539c58052684ba1836db51070ab6d514e3833", "endsWithNewline": true});

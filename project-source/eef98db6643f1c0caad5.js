@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_synthesis/__init__.py", "lines": ["\"\"\"Package initializer for the event synthesis microservice in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "fc8822f3db34b3f7f20d01302bc76d566ceba77e4eb4e7b4504b2da2330e78e0", "endsWithNewline": true});

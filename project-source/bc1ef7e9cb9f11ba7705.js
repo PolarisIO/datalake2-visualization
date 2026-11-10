@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "docs/source/modules.rst", "lines": ["src", "===", "", ".. toctree::", "   :maxdepth: 4", "", "   src"], "blocks": [{"start": 1, "end": 7, "label": "Imports and module setup"}], "lineCount": 7, "sha256": "3be9f31e9d8b45e19f273dd29ed93f748996e526762e6f8dbc008c3264f0c4e7", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/feeds/cli/__init__.py", "lines": ["\"\"\"CLI package for feeds microservice.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "921f177ca610d9a65688f1fb0f1a474825176ea1ef168a6915f9c9b9bfdc959a", "endsWithNewline": true});

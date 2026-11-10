@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_synthesis/aws/__init__.py", "lines": ["\"\"\"AWS integration package for the Event Synthesis Service.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "9a5524d72e01fbe02abfc9459cf55bb02e8c184dd9e93d95df758468d3e032a7", "endsWithNewline": true});

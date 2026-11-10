@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/db/ingest_control/ddl/__init__.py", "lines": ["\"\"\"Raw DDL (triggers, roles, grants) applied by the ingest_control Alembic chain.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "47fdf14464b28c61b22a5d32d66fcbfa4114f31a132d3b3a2aee9c5b0cc8fedc", "endsWithNewline": true});

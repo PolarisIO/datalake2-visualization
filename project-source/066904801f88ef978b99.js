@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/ai_questionnaire/tasks/__init__.py", "lines": ["\"\"\"Package initializer.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "6bb58c75786cb4de713b6a19105e385ff426be0f41d57ef0573c8ab953dfb0a6", "endsWithNewline": true});

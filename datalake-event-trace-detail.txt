@@ -1,0 +1,154 @@
+DATALAKE2 — EVENT EXTRACTION, SYNTHESIS AND FAILURE DETAILS
+Source-only review on Polaris, 2026-11-09
+Repository PolarisIO/DataLake2, revision a5ef1eca3c1072dc895ce5058dbfdd180ca6d6d1.
+No services, model calls, queue sends, database writes or application tests executed.
+All paths below are relative to that repository. Example identifiers are fictional.
+
+1. The event branch has its own contract
+
+Entity classification may hand work to Event Extraction. EventExtractionMsg contains article_id, article_type, feed_id and source_activity_id; manual_upload_account_id and source_microservice are optional. activity_trail carries upstream activity IDs. source_activity_id selects the upstream evidence run; it is not interchangeable with the current extraction activity or the article ID.
+Source: src/microservices/event_extraction/aws/sqs/messages.py:13.
+
+process_layer_one_msg marks its own activity PROCESSING in a short write session, reads the current prompt versions, and invokes ExtractionService.extract_events. The prompt-version IDs are preserved with the resulting raw events. Cancellation and ordinary errors use separate activity-cleanup handlers.
+Source: src/microservices/event_extraction/tasks/message_processing/layer_one_messages.py:34.
+
+ExtractionService gathers the article, matched entities and doc_article_map on the writer connection because it must see the upstream service's committed writes. A replica miss could otherwise become a terminal SKIPPED outcome. Slow-changing prompt lookup reads and immediate upstream evidence reads have different freshness requirements.
+Source: src/microservices/event_extraction/services/extraction_service.py:209.
+
+2. Zero, missing and invalid are different outcomes
+
+Missing doc_article_map: mark the extraction activity SKIPPED and return no raw-event IDs.
+Valid response with zero events: mark activity COMPLETED and return no raw-event IDs.
+Malformed/invalid response: retry only the declared invalid-response exception within the LLM parsing loop. Repaired JSON is rejected rather than accepted as a possibly truncated extraction. Transient provider/API errors propagate to the queue-level failure path.
+These three branches must not be collapsed into “no events were extracted.”
+Source: extraction_service.py:249,294,349,407.
+
+Category/type text is resolved case-insensitively through LookupResolver. An unmapped value can retain its raw text with a NULL category/type FK; nullable does not mean the entire event disappeared.
+Sources: services/helpers/lookup_resolver.py:110; models/raw_events.py:34.
+
+3. What a raw event contains
+
+event_extraction.raw_events represents one extracted event in one document. It links to entity_classification.doc_article_map and records:
+- raw category/type plus resolved category/type IDs where available;
+- title, summary, confidence;
+- event_date, event_date_precision and article_published_at as distinct concepts;
+- event_status and is_reporting;
+- canonical entity IDs with role/confidence/provenance;
+- topic tags, geographic specificity, key details and research hints;
+- prompt versions and raw model response for audit.
+
+A document can produce zero, one or many rows. Geographic specificity is not the same as the set of linked market entities. The event's business date is not the time the platform learned it.
+Source: src/microservices/event_extraction/models/raw_events.py:34.
+
+_persist_events writes raw-event rows, per-entity retained/dropped decision evidence and terminal activity state in one transaction. That gives internal extraction consistency; it does not atomically include SQS or the later Accelerate transaction.
+Source: extraction_service.py:423.
+
+4. Fan-out from one extraction to many synthesis messages
+
+publish_raw_events creates one notification per raw_event_id. It commits EventExtractionSentSQSMessage rows before external queue sends, then separately stamps native queue IDs or send_failed_at.
+The payload has raw_event_id, integer doc_id, activity_trail, published_at and optional replay_reason, plus the common tracking identity. The source publishes one global FIFO message group, with raw_event_id as the queue deduplication key.
+Sources: services/helpers/raw_event_publisher.py:32,47,85,99,111; src/microservices/event_synthesis/aws/sqs/messages.py:18.
+
+This publisher intentionally differs from the shared one-message helper because one extraction activity has N output events. Its pending query selects only rows with neither native ID nor send_failed_at; prior failed rows are not automatically retried by that selection. A send exception is logged and stamped; the raw events and completed extraction activity remain. extract_events warns on partial success, but does not roll back already-persisted raw events.
+A non-throwing publisher response increments its success count even if its MessageId cannot be stored as a native UUID.
+Therefore “extraction COMPLETED” is not proof that every raw event reached synthesis. Look at the per-raw-event tracking rows and the synthesis ledger. Do not assume the shared helper's resend rules apply here.
+Sources: raw_event_publisher.py:47,111; extraction_service.py:329.
+
+5. The synthesis worker has a separate ledger
+
+RawEventMessage is validated together with request-type and processing-layer attributes. An invalid message is left undeleted for queue redelivery/dead-letter handling. A wrong observed FIFO group warns rather than rejects, because older replay messages may use prior groups.
+Source: src/microservices/event_synthesis/tasks/sqs_worker.py:57.
+
+The worker is a serial poll-and-process loop: it awaits one message's processing before the next receive. Combined with the global FIFO group and one intended replica, this is a correctness/concurrency constraint, not a knob to casually increase.
+Source: sqs_worker.py:213; aws/sqs/messages.py:13.
+
+event_synthesis.ess_processing_ledger is keyed by raw_event_id, with claimed/completed/failed status, timestamps, result event ID and error. It deliberately has no cross-database FK and can outlive its raw event.
+Source: src/microservices/event_synthesis/models/ledger.py:16.
+
+process_message branches:
+- completed ledger: acknowledge without running synthesis again;
+- failed ledger, no replay_reason: acknowledge/skip;
+- failed ledger with replay_reason: treat as a fresh operator replay attempt;
+- claimed ledger: look for committed Accelerate evidence first;
+- claimed, no recoverable evidence, attempts exhausted: record terminal failure and apply grace visibility;
+- otherwise: claim/reclaim and load the raw event, leave the DataLake session, synthesize, mark ledger complete in another write session, then acknowledge.
+
+The replay_reason branch is driven by a nonempty payload value; that value alone is not proof an authorized operator requested replay. Completed ledgers still acknowledge even when it is present.
+
+There is no single transaction spanning DataLake, Accelerate and SQS. Recovery is what bridges a crash between those commits.
+Source: tasks/message_processing/process_message.py:49.
+
+6. Deciding whether this is a new event or more evidence for an old one
+
+SynthesisOrchestrator.process_one resolves tenant ownership from the document, prepares the incoming summary embedding outside write transactions and retrieves candidates on the Accelerate writer. A stale replica miss could create a duplicate event.
+Source: src/microservices/event_synthesis/services/orchestrator.py:72.
+
+CandidateRepository combines entity-overlap, taxonomy/time and embedding channels, hydrates scoring inputs, deduplicates and ranks the combined candidates. Source defaults: per-channel limits100, final limit150, active events only. Date-window defaults differ by channel; an unknown date uses recent last_article_on. These are code defaults, not a claim about live settings.
+Sources: repositories/candidates.py:59,180,278,645; config/candidate_retrieval.py:12.
+
+The match score is NOT a probability. It is a weighted similarity:
+sum(weight * available factor) / sum(available weights).
+A factor returning None is excluded. A measured0 remains evidence against.
+Default weights are entity0.25, type0.25, category0.15, temporal0.15, summary0.20. Thresholds are required config values; this review did not inspect live settings.
+Sources: services/scoring/composite.py:49; services/scoring/match_config.py:12.
+
+Factor meanings:
+- Entity: Jaccard overlap using complete entity sets. Both empty -> unavailable; one empty ->0.
+- Type:1 for same type,0.35 for different types in the same known category,0 otherwise; unknown type -> unavailable.
+- Category:1 for same known category,0 otherwise; unknown -> unavailable.
+- Time: coarsest precision wins. Exact/day tier decreases by distance; month/year precision uses coarser bands.
+- Summary: precomputed cosine similarity clamped to[0,1], or unavailable.
+Source: services/scoring/factors.py:26,48,69,82,134.
+
+Synthetic arithmetic only: factors0.8,1,1,0.8,0.9 with default weights produce0.90. That does not on its own authorize a merge: the configured thresholds and guards also apply.
+
+No entity overlap and a different type force CREATE_NEW. No entity overlap with matching type cannot auto-merge. An automatic merge also requires a measured summary at the configured minimum (source default0.75). Comparisons use unrounded values; stored diagnostics are rounded.
+Source: composite.py:74,95,134.
+
+Multiple candidates are ranked deterministically. Automatic confirmed candidates win by the documented rank. Ambiguous candidates go to LLM disambiguation, prioritizing summary evidence. The source default call budget is3; any eligible second opinion consumes that budget. An LLM error yields RETRY_OR_DLQ rather than guessing CREATE_NEW.
+Sources: services/scoring/multi_candidate.py:81,121,145; match_config.py:12.
+
+This matching/scoring code lives inside event_synthesis. It is not the separate Scoring repository's business scoring pipeline.
+
+7. Writing and recovering Accelerate results
+
+CREATE_NEW invokes SynthesisService.synthesize_one. It prepares embeddings outside the write transaction, then writes the source event, normalized/direct and derived owner entities, document evidence, model associations and created-change record together. A unique raw_event_id receipt prevents the same raw event from creating two independently committed events. On a conflicting receipt it rolls back its speculative create and recovers the prior event ID.
+Source: services/synthesis_service.py:115,349,397.
+
+MERGE_CONFIRMED calls MergeLinkService.merge_link_one with the selected source-event ID and the same tenant/embedding context. The writer owns evidence linkage and merge behavior; the orchestrator does not perform arbitrary table edits itself.
+Sources: services/orchestrator.py:171; services/merge_link.py:216.
+
+RecoveryService first checks event_synth.source_event_documents by raw_event_id, then source_event_changes by triggering_raw_event_id. If it finds committed evidence, it returns the existing source_event_id. The worker can complete its DataLake ledger and acknowledge without rerunning the model.
+Source: services/recovery.py:30.
+
+Fictional crash trace:
+A-article -> EE-activity -> raw-R1 -> SQS-tracking-T1 -> ESS ledger claimed.
+Accelerate commits source-S1 and evidence for raw-R1.
+Process stops before ledger complete/queue acknowledgement.
+Redelivery sees claimed, finds the Accelerate receipt, marks ledger completed with source-S1, acknowledges.
+The receipt is the evidence; absence of a final activity/ack is not proof the earlier transaction rolled back.
+
+8. What to inspect when someone says “events are missing”
+
+Use authorized, narrowly scoped read access; this is a diagnostic sequence, not a request to run production queries.
+1. Was an event branch actually emitted from entity classification?
+2. Does the exact source_activity_id have doc_article_map and matched evidence? Missing mapping can be SKIPPED.
+3. Was the response zero-event, invalid/retried, or persisted?
+4. For each raw event, is the output tracking row pending, failed or carrying a native send ID?
+5. Does ESS have no ledger, claimed, completed or failed? Is this an ordinary redelivery or explicit operator replay?
+6. Does committed Accelerate document/change evidence already exist?
+7. Inspect matching outcome and top candidate diagnostics before assuming a merge is loss.
+8. Distinguish business event_date, article publication date, processing time and availability time.
+
+Relevant existing tests to read before changing code:
+test/unit/microservices/event_extraction/test_raw_event_publisher.py
+test/unit/microservices/event_synthesis/services/test_recovery.py
+test/unit/microservices/event_synthesis/services/test_ledger_repo.py
+test/unit/microservices/event_synthesis/services/scoring/test_composite.py
+test/integration/event_synthesis/test_claimed_recovery.py
+test/integration/event_synthesis/test_recovery_paths.py
+test/integration/event_synthesis/test_ledger_dedup.py
+These files were found, not executed in this study. Do not infer passing tests or live correctness.
+
+Limits
+This traces the main event extraction/create/merge/recovery path. It is not an exhaustive audit of lifecycle refresh, scoring hooks, QA jobs, maintenance CLIs or new ingestion-spine implementation. No live threshold configuration or customer records were read.

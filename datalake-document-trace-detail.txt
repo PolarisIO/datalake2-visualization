@@ -1,0 +1,256 @@
+DataLake2 document trace: the implementation details
+Source study on Polaris, 2026-11-09
+
+Repository root: PolarisIO/DataLake2
+Revision: a5ef1eca3c1072dc895ce5058dbfdd180ca6d6d1
+The checkout was clean at the beginning and end of the source reads.
+This extends datalake-research.txt in the private Daily Agent directory. No service, queue, database query, test or migration was executed. Everything below is a source trace, not a processing receipt. All IDs and article examples are explicitly fictional.
+
+1. The identities to keep separate
+
+Imagine a fictional news page, “Example Components opens a factory,” discovered on a fictional feed.
+
+F = feed UUID, e.g. 11111111-1111-4111-8111-111111111111.
+W1 = one web-extraction L1 activity, not the article.
+W2 = the L2 activity for this article URL.
+A = article UUID, created only after content persistence selects the nonduplicate path.
+Q1 = AIQ L1 activity; E1 = entity-classification activity; Q2 = AIQ L2 activity; T1 = model-tagging activity.
+D = Accelerate integer document ID, e.g. 900001, created downstream for a crawl.
+M = one msg_tracking_id. Every handoff has its own M.
+C = continuity_id shared for correlation across this item's messages, not a unique message key.
+
+The sender's activity ID becomes the next message's source_activity_id. It does not become the receiver's activity ID. The receive path registers or recovers that receiver activity. For example Q1 is carried as source_activity_id in the EC message; E1 is the EC row that consumes it.
+
+BaseMsg declares msg_tracking_id and continuity_id. Typed messages add article/feed/document identifiers and often an activity_trail dictionary. Queue request type and destination layer are routing metadata, not substitutes for those IDs.
+References: src/common/aws/sqs/messages.py:9; src/common/utils/activity_registration.py:32; src/common/helpers/sqs_msg_delivery.py:269; src/microservices/web_extraction/tasks/sqs_worker.py:36.
+
+2. Crawl step 1: the feed scheduler produces work, not an article
+
+FeedService.layer_one_pipeline selects ACTIVE non-manual feeds whose next_run_at is due, excluding those with recent queued/processing L1 work. It claims rows with FOR UPDATE SKIP LOCKED, ordered oldest due first, and updates scheduling fields before sending. No Article exists for each listed URL yet.
+
+Its WebExtractionLayerOneMsg carries feed_id and feed_src. The receiver uses the LAYER_ONE message/schema and activity-table maps, registering W1 against the feed. The service name “feeds” can mislead: this worker uses database scheduling, whereas most following workers consume queued messages.
+
+Read/write surface:
+- Reads and updates feeds.feeds; reads blacklist state and recent web_extraction.layer_one_activities.
+- Writes feeds.sent_sqs_messages for outbound tracking.
+- The receiver creates/reuses web_extraction.layer_one_activities.
+
+References: src/microservices/feeds/services/feeds.py:54,106,146; src/microservices/feeds/aws/sqs/feed_client.py; src/microservices/web_extraction/aws/sqs/messages.py:11; src/microservices/web_extraction/tasks/sqs_worker.py:61.
+
+3. Crawl step 2: Web Extraction L1 filters the list before article work
+
+WebExtractionService.layer_one_pipeline:
+1. Loads blacklist state before saving a new feed fingerprint. Otherwise a failed blacklist read could save the hash, and the retry could call the feed unchanged.
+2. Fetches an article list.
+3. check_feed_content_changed updates fingerprint/adaptive state. An unchanged feed marks W1 SKIPPED with UNCHANGED_FEED_CONTENT and exits.
+4. Persists the list response.
+5. Normalizes URLs; removes recently processed URLs and URLs over the failed-attempt cap.
+6. Removes URLs already sent by this W1 on an earlier attempt.
+7. Filters blocked domains, publication dates and maximum count. Per-feed max_articles overrides the default.
+8. Sends one WebExtractionLayerTwoMsg per remaining URL.
+
+The L2 message carries F, article_url, source_activity_id=W1 and activity_trail. If no URL remains, W1 becomes COMPLETED even though no article proceeds. If the batch partly fails, the source logs failed versus successful sends and ultimately completes W1; “L1 complete” therefore does not mean every candidate became a document.
+
+Read/write surface:
+- feeds.feeds and web_extraction.feed_hashes/scheduling-related state.
+- web_extraction.responses for the fetched list.
+- Existing activity/status/queue-tracking records for URL and resend filtering.
+- web_extraction.sent_sqs_messages for the L2 batch.
+
+References: src/microservices/web_extraction/services/web_extraction.py:360,394,420,447,465,518,552,573,588,611; src/microservices/web_extraction/aws/sqs/messages.py:20.
+
+4. Crawl step 3: Web Extraction L2 is a gated state machine
+
+process_layer_two_msg validates article_url, uses a pinned database connection, marks W2 PROCESSING and takes a URL-derived advisory lock. The lock survives intermediate commits; it is not a database transaction held open across network calls. Two activities for the same URL may both be PROCESSING while one waits for the lock.
+
+The core layer_two_pipeline has these meaningful branches:
+
+A. Early media-container gate. A new unsuitable URL can be skipped before fetch/LLM/embedding costs. If an earlier attempt has already persisted an outcome, the gate defers to recovery rather than abandoning it.
+
+B. Existing response. Rebuild the article from web_extraction.responses and reuse its created_at as scrape time. Recover frozen similarity time/group context. Site-error and paywall guards still run. A prior completed article/outcome can be recovered and forwarded without re-fetching or reclassifying it.
+
+C. Fresh response. Check domain blacklist and feed status, fetch article, reject site-error/paywall content before writing a response, then persist the usable response.
+
+D. Landing-page gate, content normalization and publication-date validation. Rich markdown is for stored/displayed content; plain stripped text is used for embeddings and dedup. A trustworthy date is resolved and stale content can be skipped. This prevents formatted image blocks/boilerplate from silently changing the embedding basis.
+
+E. Embedding and source classification. classify_layer_two_article combines similarity, optional verifier decisions, retry recovery and grouping policy:
+- DUPLICATE: write/upsert web_extraction.duplicated_articles, retain the matched canonical article ID, record activity_article_statuses, end W2 as DUPLICATE; no new AIQ/translation handoff.
+- Nonduplicate: write/reuse web_extraction.articles, zyte_articles and article_chunks. Both unique and syndicated outcomes have a source_classifications/group relationship. A syndicated article is still its own stored article; it is not the same as a discarded duplicate.
+
+F. Record activity_article_statuses before sending. Then decide translation from the article's text. An English/no-translation path sends AIQuestionnaireLayerOneMsg directly with A, F, source_activity_id=W2 and source_microservice=WEB_EXTRACTION. Otherwise it sends ArticleTranslationLayerOneMsg, including A, F, URL and webex_layer_two_activity_id=W2.
+
+G. Start the image-processing work for the nonduplicate and mark W2 COMPLETED. The image result is separate from whether the text handoff was already sent.
+
+References: src/microservices/web_extraction/tasks/message_processing/layer_two_messages.py:40,73,93,104; src/microservices/web_extraction/services/web_extraction.py:670,700,748,787,827,866,890,916,927,944,974,998,1018,1070,1092,1151,1161.
+
+A misleading shorthand to avoid: “dedup happens on URL.” L1 URL filtering and L2 content similarity are different gates. Another: “all crawls pass through translation.” Current code explicitly bypasses it when text does not require it.
+
+5. Optional translation: preserve article identity and change the source pointer
+
+article_translation_layer_one_pipeline loads language signals, records detection, and when needed chunks text for translation then persists the result. It preserves A and F. Its outgoing AIQuestionnaireLayerOneMsg carries source_activity_id=the translation activity, source_microservice=ARTICLE_TRANSLATION, and the manual upload identity if present.
+
+AIQ uses source_microservice to decide whether translated text should exist. A direct WebEx path must not accidentally consume an old translation; a translated path should not silently substitute untranslated content.
+
+Read/write surface:
+- Existing article/response text and language/translation records.
+- Article-translation activity/audit/persistence records.
+- article_translation.sent_sqs_messages for Q1 handoff.
+
+References: src/microservices/article_translation/services/article_translation_pipeline.py:39,64,121,181,196; src/microservices/article_translation/aws/sqs/messages.py:19; src/microservices/ai_questionnaire/services/ai_questionnaire.py:224.
+
+6. AIQ L1: entity extraction is its own persisted result
+
+AIQuestionnaireService.ai_questionnaire_layer_one_pipeline first reads the correct article text and calls run_entities_layer_one. That helper loads versioned prompts, performs PEOPLE, ORGANIZATIONS and LOCATIONS extraction, and writes three ai_questionnaire.entity_responses rows transactionally. A row records A, Q1, entity_type, model and prompt-version provenance, raw response and validated response.
+
+Retry behavior is explicit:
+- All three rows and sent EC message exist: skip this step.
+- Three rows exist, message absent: resend only.
+- Partial row set: log the anomaly, rerun the calls; ON CONFLICT DO NOTHING preserves already-written rows.
+
+Important qualification: the current 'message sent' caller guard checks tracking-row existence, not confirmed broker receipt. The retry bullets above describe the branch intent; an UNKNOWN/failed send can still be skipped by that guard. See queue-delivery-detail.txt section7 for the source-inferred window.
+
+The EC payload is EntityClassificationLayerOneMsg(A,F,article_type,source_activity_id=Q1,manual_upload_account_id?,doc_id?,activity_trail,source_microservice). It is sent BEFORE the separate L1 global-category work. That means EC can run while Q1 continues its global prompts. This is not a strictly serial “finish all L1 work, then EC” pipeline.
+
+Global L1 categories write ai_questionnaire.model_category_responses. The current entity path reads entity_responses, not “latest category JSON” from that older table. Empty global categories can finish Q1 after the entity handoff already happened.
+
+References: src/microservices/ai_questionnaire/services/ai_questionnaire.py:187,248,282,301; src/microservices/ai_questionnaire/services/entities/service.py:118,366,416,461,488,503,518; src/microservices/ai_questionnaire/models/entity_responses.py:24; src/microservices/ai_questionnaire/services/helpers/global_categories.py:123,229.
+
+7. Entity Classification: turn mentions into defensible account relevance
+
+EntityClassificationService.entity_classification_layer_one_pipeline receives Q1 as source_activity_id. get_entities_response selects every entity type with BOTH article_id=A and layer_one_activity_id=Q1. Missing one of the three rows raises; it does not mix the newest people from one run with organizations from another.
+
+The core matching phase:
+- Normalize/merge repeated entity names and evidence.
+- Query master_text -> active text_match_xref -> nvw_match entities, with category priority. SQL normalizes the stored names consistently.
+- Resolve source-map/context metadata and corporation/industry provenance.
+- Write EC people, organizations, locations, matched_entities, industries and article_entity_map rows.
+- For MVW feeds, read enabled feed_markets for baseline market relevance.
+- Write per-organization context and candidate_observations for unmatched organizations under fail-safe savepoints.
+
+These IDs are not interchangeable. A master nvw_match entity integer, a corporation ID and an Accelerate canonical platform_entity UUID serve different roles. Industry references can numerically collide with corporation IDs; existence of the integer alone is not a valid classification rule.
+
+Crawled-document projection:
+- Build DocEntityReason records explaining corporation, market or industry relevance.
+- With no reasons, return no document, skip Q2 handoff, and still complete E1.
+- Otherwise create/reuse doc.doc_content and doc.documents, write doc.doc_entity_map, copy embeddings to ai.document_chunks and write entity lists to doc.source_data.
+- Return D, record entity_classification.doc_article_map(A,D,E1), then send AIQuestionnaireLayerTwoMsg(A,F,document_id=D,source_activity_id=E1,account_types,...).
+
+The mapping deliberately contains a UUID article and an integer external doc_id. It has a unique (article_id,doc_id,layer_one_activity_id) constraint. There is no cross-database foreign key on doc_id; correctness depends on the explicit write/recovery contract.
+
+References: src/microservices/entity_classification/services/entity_classification.py:97,140,171,193,248,263,296,332,367; src/microservices/entity_classification/services/helpers/entity_helpers.py:92,363; src/microservices/entity_classification/services/helpers/table_reads.py:36; src/microservices/entity_classification/services/helpers/external/sync.py:269; src/microservices/entity_classification/models/doc_article_map.py:25; .docs/codebase/ENTITY_MATCHING.md:160.
+
+8. AIQ L2 and tagging: classification work is not the final status
+
+Q2 selects global and account-type-specific categories, resolves versioned prompts/schemas, reads its own prior filter results for retry skipping, and gets the correct article text. Global and account category work run concurrently. Completed per-account results are batch-written to ai_questionnaire.filter_model_responses; global results also use that table.
+
+When at least one per-account category succeeds, or there were no per-account categories:
+- Collect successful/skipped-existing category IDs plus global IDs.
+- If that list is nonempty, send ONE AIModelTaggingLayerOneMsg with A,F,doc_id=D,source_activity_id=Q2,category_ids.
+- Mark Q2 COMPLETED.
+
+If every required per-account category fails, Q2 is marked FAILED and raises. If the combined applicable list is truly empty, no tagging message is sent even though Q2 completes. That is a different case from all model calls failing.
+
+Model tagging:
+- Validate that (A,D) has a doc_article_map row.
+- Resolve category IDs against the current active registry; refresh/recheck before declaring unknown.
+- Fetch FilterModelResponse rows scoped to Q2, not merely A.
+- Use the keys actually emitted in each validated response, not a newly reloaded category schema.
+- True matches create category_prompt_version_runs and data_model_responses.
+- False matches do not create those rows; they can downgrade previously true document/model associations.
+- After DataLake commit, upsert Accelerate ai.doc_ai_model_map; consolidate false downgrades without clearing a model that is true in another category.
+- Set doc.documents.status=READY; then mark T1 COMPLETED.
+
+No new free-form LLM call is required in model tagging. Its job is projection/reconciliation of the already validated results. A missing FMR or unknown model/category may be logged and skipped, yet the final document can still become READY. READY is therefore not evidence that every conceivable category produced a tag.
+
+References: src/microservices/ai_questionnaire/services/ai_questionnaire.py:330,372,410,500,525,556,591; src/microservices/ai_model_tagging/services/ai_model_tagging.py:147,181,189,210,222,234,267,287,315,326,347; src/microservices/ai_model_tagging/services/helpers/table_reads.py:291.
+
+9. Manual upload: same downstream machinery, different identity and branches
+
+Start with a fictional account 7001 and pre-created Accelerate document D=900101. The incoming ManualUploadMsg contains account_id, doc_id and the stored-object reference. W3 is a new web-extraction layer-three activity. No real object keys are used in this report.
+
+manual_upload_pipeline first marks D PROCESSING. It checks existing activity_article_statuses and ManualUploadAccount recovery anchors BEFORE loading/embedding. That avoids matching a retry against its own previously committed article chunks.
+
+It reads the upload once to obtain rich stored text, plain embedding text and image ordinals. Oversized objects, PDF processing/conversion limits and textless documents are terminal extraction failures; transient object reads propagate for retry. Nonempty plain text is embedded and compared to the content corpus.
+
+The branching is more subtle than “duplicate means stop”:
+A. No duplicate: atomically create Article + ManualUpload + ArticleChunks + ManualUploadAccount. Metadata enrichment follows.
+B. Content matches a crawled article that has no ManualUpload yet: reuse A, create the manual-upload representation and account link, and CONTINUE.
+C. Content matches a ManualUpload but this account has no ManualUploadAccount: create this account's link/document association and CONTINUE.
+D. Content matches an article already uploaded by THIS account: write DuplicatedArticle and select the terminal duplicate path.
+
+A/B/C send ArticleTranslationLayerOneMsg with A, the manual-upload feed ID, article_type=MANUAL_UPLOAD, manual_upload_account_id, the preexisting D, source_activity_id=W3 and webex_layer_three_activity_id=W3. The stored Article.feed_id can be the original crawl's feed when A is reused; it must not be assumed equal to the message's manual-upload feed.
+
+In EC, the uploading account's view type is explicitly added to Q2 account_types even if master matching found no relevant entity. An MVW upload may seed its own account market for evidence. This account-type floor selects applicable categories; it is not a fabricated entity match.
+
+EC reuses the pre-created D and intentionally skips doc_entity_map writes for manual uploads because account association already exists. On the first content attachment it sets QUESTIONING. On a reuse/retry mapping branch it still updates chunks/source_data/images but may skip that status reset. Tagging ultimately sets READY after successful processing.
+
+References: src/microservices/web_extraction/aws/sqs/messages.py:39; src/microservices/web_extraction/services/web_extraction.py:1257,1265,1344,1354,1405,1441,1467,1480,1528,1560,1660; src/microservices/entity_classification/services/entity_classification.py:217,281; src/microservices/entity_classification/services/helpers/external/sync.py:431,476,513.
+
+10. Same-account duplicate: a different document, no EC pass
+
+For branch D above, assume existing original document 900101 and a newly uploaded duplicate document 900102.
+
+The service:
+- Records the duplicate article outcome before cross-database projection.
+- Links duplicate document 900102 to original 900101.
+- Projects article images onto 900102.
+- Copies the original's entity source_data rows (the allowed entity-model IDs only) onto 900102.
+- Sets 900102 DUPLICATE.
+- Marks W3 DUPLICATE.
+- Sends no translation, AIQ or EC message.
+
+The original and duplicate document IDs remain separate. Upsert keys include the destination doc_id, so the copy must not overwrite the original document's rows. A retry re-applies linkage/projections from the stored outcome.
+
+Known timing limit: image projection has a bounded sentinel wait. source_data projection has no wait; if EC has not yet written original source_data, it copies zero rows and still ends duplicate. Nothing later automatically reprojects it. That is already marked DAT-8857 in source. A reader should not equate DUPLICATE with “all enrichment successfully copied.”
+
+Manual L3 also does not participate in the L2 syndication-grouping policy. A SYNDICATION_CANDIDATE content outcome is treated as nonduplicate for this branch.
+
+References: src/microservices/web_extraction/services/web_extraction.py:1280,1609,1620,1701; src/common/helpers/source_data_projection.py:91,159; src/microservices/web_extraction/services/web_extraction.py:1858.
+
+11. A concrete fictional handoff map
+
+F -> W1, then URL-specific W2 -> A -> Q1 -> E1 -> D -> Q2 -> T1.
+Translation, if used, inserts its own activity between W2/W3 and Q1.
+For manual upload, D exists at the start; for a matched crawl, D is created in EC.
+The same A may be associated with multiple manual account/document mappings.
+
+Source pointers:
+- WebExtractionLayerTwoMsg.source_activity_id = W1.
+- Direct AIQ L1 source_activity_id = W2; translated AIQ L1 source_activity_id = translation activity.
+- EntityClassificationLayerOneMsg.source_activity_id = Q1.
+- AIQuestionnaireLayerTwoMsg.source_activity_id = E1.
+- AIModelTaggingLayerOneMsg.source_activity_id = Q2.
+- doc_article_map.layer_one_activity_id = E1, not Q1.
+- FilterModelResponses used by tagging belong to Q2.
+
+The sender commits its sent_sqs_messages row, stamps msg_tracking_id into the body, sends, then records the native queue ID. On receive, activity registration handles duplicate deliveries. Tracking ID, native queue ID, continuity ID and source activity ID answer different debugging questions; do not join tables with whichever UUID is convenient.
+References: src/common/helpers/sqs_msg_delivery.py:318,322,377,397; src/common/utils/activity_registration.py:32; each message schema cited above.
+
+12. What to check when the fictional document “disappears”
+
+- No W2: was the feed unchanged, URL recent/already sent, failure-capped, blocked, old, or excluded by cap?
+- W2 but no A: did an early gate skip before persistence? A duplicate points at an existing A instead of creating one.
+- A but no D: did EC find no relevance reasons, or is matching/projection failed? For manual upload D already exists; look for its map and current status instead.
+- Q1 says FAILED while EC work exists: the entity handoff preceded later global prompt work.
+- E1 completed but no Q2: no document was returned; a completed EC activity alone is not a successful user-visible document.
+- Q2 completed but no T1: inspect the actual combined applicable category list; zero categories sends nothing.
+- T1 READY but a tag absent: inspect unknown-category, missing-FMR, unknown-model and false-result paths before blaming queue loss.
+- Duplicate D missing entity lists: check whether original source_data existed at projection time.
+- Repeated failed manual work still shows PROCESSING/QUESTIONING: cancellation/timeout paths differ from ordinary exceptions; this was researched for a separate proposal.
+
+These are hypotheses grounded in branches, not claims any incident occurred today.
+
+13. Current source versus misleading older descriptions
+
+- EC's current entity input is three run-scoped entity_responses, not the latest model_category_responses row.
+- Translation is conditional for crawled text; manual nonterminal uploads enter translation explicitly.
+- Current model tagging has one L1 entrypoint fed by the aggregate Q2 result, not an obligatory L1+L2 tagging pair.
+- Empty L1 global categories do not by themselves strand a document: the entity handoff already occurred.
+- Content duplicate is not synonymous with same-account duplicate upload; only the latter takes the terminal duplicate-document branch.
+- Source data-model FKs often point to ai_prompts, even when Python model files remain under ai_questionnaire. Follow the model's schema/FK declaration.
+- Comments that call a COMPLETED activity “success” do not prove all downstream business outcomes.
+
+The report intentionally stops before the event-extraction/synthesis branch and broader reliability/storage review, which are covered separately by the coordinating team.
+
+Verification of this artifact
+Source-only study;  no runtime business/data results claimed. The cited paths/line starts were checked against the inspected checkout. No repository changes or external actions were made.

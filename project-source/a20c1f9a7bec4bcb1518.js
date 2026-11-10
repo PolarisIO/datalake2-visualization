@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/db/__init__.py", "lines": ["\"\"\"Package initializer for the Datalake2 database layer.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "611ed248d1987d255bc43b4fdc9ade252b7204e263d8a8acdc25e5567b42abfb", "endsWithNewline": true});

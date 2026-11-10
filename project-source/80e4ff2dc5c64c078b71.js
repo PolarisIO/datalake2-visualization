@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/ai_model_tagging/schemas/__init__.py", "lines": ["\"\"\"Package initializer for ai_model_tagging.schemas microservice.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "f7101b5c7100350c0fbcfcd49aa106e2f575aa2e4181fa33695650fc12904fb7", "endsWithNewline": true});

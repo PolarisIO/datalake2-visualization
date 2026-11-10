@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/cli/__init__.py", "lines": ["\"\"\"Package initializer for the CLI submodule in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "006bd12bcf1530f2e9c5e317452df8140969f48352418d707a615416745055fb", "endsWithNewline": true});

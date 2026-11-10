@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/script_runner/__init__.py", "lines": ["\"\"\"Package initializer for the script runner microservice in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "ccb5a0ca7bd2b0e3fdccac2cffb5110a34357aa450c55012da0208fb2fa93057", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_extraction/cli/fixtures/__init__.py", "lines": ["\"\"\"Package initializer for event_extraction.cli.fixtures.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "6faf3d3e7a978af8126dd5fb8309c08fe33cf3c7699919b60b615d613c8c63e6", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/event_extraction/services/helpers/__init__.py", "lines": ["\"\"\"Package initializer for event_extraction service helpers.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "6418f1dbc2bfdf2529a707f4adef662be87c82199d39818940fd8a83ff9e3766", "endsWithNewline": true});

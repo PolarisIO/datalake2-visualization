@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": ".python-version", "lines": ["3.13"], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "02e735b3dfe1c32833eb550b7ff8ffa17f5f2bc3fa1e7bae61a8f5a3883ce398", "endsWithNewline": true});

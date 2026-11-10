@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/__init__.py", "lines": ["\"\"\"Package initializer for Datalake2 microservices.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "1eed656ebfc9ccf353983401361160e7e1ec44023f7e093cfd94c6dfec84abca", "endsWithNewline": true});

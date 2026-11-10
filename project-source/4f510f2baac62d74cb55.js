@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/aws/sqs/__init__.py", "lines": ["\"\"\"Package initializer for AWS SQS utilities in Datalake2.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "9a64ad8fe2911488b33e05c3d3bf4c19b71855e505d370b42ab9c67d952d4292", "endsWithNewline": true});

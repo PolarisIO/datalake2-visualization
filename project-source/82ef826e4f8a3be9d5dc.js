@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/common/dataaccess/__init__.py", "lines": ["\"\"\"Shared data-access helpers for common cross-service lookups.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "84299adce00b89c33bb46d33e8d549154a398d665daa575ed3e0e08e553f63c6", "endsWithNewline": true});

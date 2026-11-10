@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/article_translation/models/enums/__init__.py", "lines": ["\"\"\"Enum types used by the article_translation models package.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "4881a7c42b8c70afcddaaeece20777752df46d2cf5e78a7fd5bf23fd70842e7c", "endsWithNewline": true});

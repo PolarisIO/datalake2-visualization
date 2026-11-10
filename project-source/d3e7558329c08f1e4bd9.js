@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/feeds/cli/fixture_loading/__init__.py", "lines": ["\"\"\"Fixture loading helpers for feeds CLI.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "ebe49acf90ea4e5bd862408b2b12183f0f2392436afc65581f55c042cb333caf", "endsWithNewline": true});

@@ -1,0 +1,1 @@
+window.receiveProjectSource({"path": "src/microservices/feeds/cli/fixtures/__init__.py", "lines": ["\"\"\"Local fixture files for feeds CLI.\"\"\""], "blocks": [{"start": 1, "end": 1, "label": "Imports and module setup"}], "lineCount": 1, "sha256": "0255bf336aeefe2cbf4968a63520b448bd1042e06ff51d98659ad04cbffba28f", "endsWithNewline": true});
