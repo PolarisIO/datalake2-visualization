@@ -25,8 +25,9 @@ Select a stage to see its inputs, writes, edge cases, and source references.
 
 ## Screenshots
 
-Each screenshot shows the selected path and its first stage. Open the walkthrough
-to select other stages and inspect their details.
+The screenshots cover both the four pipeline paths and the supporting sections
+below them: the worked example, project explorer, and source-code walkthrough.
+Open the walkthrough to select other stages and inspect their details.
 
 ### Web article
 
@@ -43,6 +44,47 @@ to select other stages and inspect their details.
 ### Send and recovery
 
 ![Send and recovery path, showing database commits, delivery receipts, and retry decisions](docs/screenshots/send-and-recovery.png)
+
+### Worked example: source article
+
+The factory-announcement example connects a source article to the pipeline's
+processing stages and shows the illustrative record values alongside it.
+
+![Factory-announcement example with its source image, stage controls, and candidate URL details](docs/screenshots/worked-example.png)
+
+### Worked example: event interpretation
+
+The event stage shows a proposed event for review, the source evidence, and what
+still needs validation. These are illustrative values, not a live extraction.
+
+![Event stage of the factory-announcement example, with candidate fields and validation caveats](docs/screenshots/worked-example-event.png)
+
+### Project explorer
+
+Browse the project's responsibilities, service folders, file inventory, and
+suggested reading route.
+
+![Project explorer with the Services area selected, repository tree, and suggested reading route](docs/screenshots/project-explorer.png)
+
+### Source-code walkthrough
+
+The source viewer pairs actual snapshot code with notes explaining selection,
+concurrency, and how to approach the implementation.
+
+![Feed-dispatch source viewer with line numbers, code blocks, and explanatory notes](docs/screenshots/code-walkthrough.png)
+
+### Queue recovery in code
+
+The recovery view connects queue-send implementation details with the distinction
+between committed work, delivery confirmation, and retries.
+
+![Queue-send recovery source view with implementation notes](docs/screenshots/queue-recovery-code.png)
+
+### Full-page overview
+
+The entire default page, from the main flow through the lower context sections:
+
+![Full DataLake2 visualization page including the flow, worked example, project explorer, and source viewer](docs/screenshots/full-page.png)
 
 ## Source and limits
 
