@@ -23,6 +23,27 @@ Then visit <http://127.0.0.1:8080>.
 Select a stage to see its inputs, writes, edge cases, and source references.
 `DataLake2-Devil-in-the-Details.html` provides the accompanying technical breakdown.
 
+## Screenshots
+
+Each screenshot shows the selected path and its first stage. Open the walkthrough
+to select other stages and inspect their details.
+
+### Web article
+
+![Web article path, from feeds through the Accelerate document and optional event branch](docs/screenshots/web-article.png)
+
+### Manual upload
+
+![Manual upload path, including extraction, classification, and document readiness](docs/screenshots/manual-upload.png)
+
+### Events
+
+![Event path, from extraction evidence through the FIFO queue to synthesized events](docs/screenshots/events.png)
+
+### Send and recovery
+
+![Send and recovery path, showing database commits, delivery receipts, and retry decisions](docs/screenshots/send-and-recovery.png)
+
 ## Source and limits
 
 This repository packages an existing local walkthrough. Its embedded DataLake2
